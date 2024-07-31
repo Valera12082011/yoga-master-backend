@@ -1,28 +1,56 @@
 const mongoose = require('mongoose');
+const { Schema } = mongoose;
 const { v4: uuidv4 } = require('uuid');
-const Schema = mongoose.Schema;
-
-const ClassesSchema = new Schema({
-  id: { type: String, required: true, unique: true, default: uuidv4 },
-  name: { type: String, required: true },
-  time: {type: String , default: new Date().toLocaleString()},
-  password: { type: String, required: true },
-  admins: [{
-    id: {type: String, required: true }
+// Визначення схеми для класу
+const classSchema = new Schema({
+  classesId : {
+    type: String, 
+    required: true, 
+    unique: true, 
+    default: uuidv4
+  },
+  name: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  description: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  instructor: {
+    type: Schema.Types.ObjectId,
+    ref: 'Instructor', // Вказує на модель інструктора, якщо є
+    required: true
+  },
+  students: [{
+    user_id: {
+        type: String
+    },
+    name: {
+        type: String
+    }
   }],
-  description: {type: String , required: true},
-  teachers: [{
-    id: {type: String, required: true }
-  }],
-  results: [{
-    msg: {type: String},
-    id: {type: String, required: true },
-    time: {type: String , default: new Date().toLocaleString()},
-    leval: {type: String}
-  }],
-
+  reviews: [{
+    reviewer: {
+      type: String,
+    },
+    rating: {
+      type: Number,
+      min: 1,
+      max: 5
+    },
+    comment: {
+      type: String,
+      trim: true
+    }
+  }]
+}, {
+  timestamps: true // Додає поля createdAt і updatedAt
 });
 
-const Classes = mongoose.model('Classes', ClassesSchema);
+// Створення моделі з використанням схеми
+const Class = mongoose.model('Class', classSchema);
 
-module.exports = Classes;
+module.exports = Class;

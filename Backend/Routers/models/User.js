@@ -5,11 +5,11 @@ const Schema = mongoose.Schema;
 
 const usersSchema = new Schema({
   id: { type: String, required: true, unique: true, default: uuidv4 },
-  name: { type: String, required: true },
-  age: { type: Number, required: true },
-  email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  role: { type: String, required: true },
+  name: { type: String},
+  age: { type: Number },
+  email: { type: String},
+  password: { type: String },
+  role: { type: String },
   avatar: { type: Buffer }, // Поле для зберігання аватара у вигляді буфера
   additionalInfo: { type: String } // Додаткова інформація про користувача
 });

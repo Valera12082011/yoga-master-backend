@@ -1,158 +1,165 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
+const User = require('../Routers/models/User');
+const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
-const router = express.Router();
-const User = require('./models/User'); // Підключаємо модель користувача
-var bodyParser = require('body-parser')
-var jwt = require('jsonwebtoken');
+const check_sql_injection = require('../utils/check_sql_injection');
 
-const SECRET_KEY = 'your-secret-key'; // Замініть на ваш ключ
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 днів в мілісекундах
-  // secure: true, // Розкоментуйте для використання тільки з HTTPS
-};
+const users = express.Router();
+const jwtSecret = 'your_jwt_secret_key_here'; // Замініть на ваш реальний секретний ключ
 
-router.use(bodyParser.json())
-router.post('/add_user', async (req, res) => {
+// Функція для хешування пароля
+function hashPassword(password) {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+// Функція для перевірки вхідних даних
+function validateRegistrationData({ name, email, password }) {
+  if (!name || typeof name !== 'string' || check_sql_injection(name)) {
+    return 'Invalid name';
+  }
+  if (!email || !email.includes('@') || check_sql_injection(email)) {
+    return 'Invalid email';
+  }
+  if (!password || password.length < 6 || check_sql_injection(password)) {
+    return 'Invalid password';
+  }
+  return null;
+}
+
+// Реєстрація користувача
+users.post('/register', async (req, res) => {
+  const { name, age, email, password, role, additionalInfo, avatar } = req.body;
+
+  // Валідація даних
+  const validationError = validateRegistrationData({ name, email, password });
+  if (validationError) {
+    return res.status(400).json({ message: validationError });
+  }
+
   try {
-      const { name, age, email, password, role, additionalInfo , avatar } = req.body;
-      console.log(req.body)
-      // Базова перевірка даних
-      if (!name || !age || !email || !password || !role) {
-          return res.status(400).json({ msg: 'Please provide all required fields' });
-      }
+    // Перевірка, чи вже існує користувач з таким email
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: 'User already exists' });
+    }
 
-      // Перевірка, чи існує вже користувач з таким паролем
-      const Passowrd = await User.findOne({ password: crypto.createHash('sha256').update(password).digest('hex') });
-      if (Passowrd) {
-          return res.status(400).json({ msg: 'Password already exists, choose a different one' });
-      }
+    // Хешування пароля
+    const hashedPassword = hashPassword(password);
 
+    // Створення нового користувача
+    const user = new User({
+      id: uuidv4(),
+      name,
+      age: parseInt(age, 10) || null,
+      email,
+      password: hashedPassword,
+      role,
+      avatar, // Зберігається як Buffer
+      additionalInfo,
+    });
 
-      // Хешування пароля
-      const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
-
-      // Приклад обробки файлу аватара, якщо він надсилається
-
-      console.log(req.body.avatar)
-
-      // Створення нового користувача
-      const newUser = new User({
-          name,
-          age,
-          email,
-          password: hashedPassword,
-          role,
-          avatar, // Буфер аватара
-          additionalInfo
-      });
-
-      // Збереження користувача в базі даних
-      const savedUser = await newUser.save();
-      res.status(201).json({ msg: 'User added successfully', status: true, id: savedUser.id , avatar : savedUser.avatar });
+    await user.save();
+    res.status(201).json({ message: 'User registered successfully' });
   } catch (err) {
-      console.error(err.message);
-      res.status(500).send('Server Error');
+    console.error(err);
+    res.status(500).json({ message:  'User already exists' });
   }
 });
 
-router.post('/avatar', async (req, res) => {
-  try {
-    const { id } = req.body;
+// Логін користувача
+users.post('/login', async (req, res) => {
+  const { email, password } = req.body;
 
-    const user = await User.findOne({ id: id });
-
-    if (!user) {
-      return res.status(404).json({ msg: 'User not found' });
-    }
-
-    if (user.avatar) {
-      // Перетворюємо Buffer у base64 рядок для створення URL
-      const base64String = user.avatar;
-      const imageUrl = `${base64String}`;
-
-      return res.json({ avatar: imageUrl, status: true });
-    } else {
-      return res.status(404).json({ msg: 'Avatar not found' });
-    }
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).send('Server Error');
+  if (!email || !email.includes('@') || check_sql_injection(email)) {
+    return res.status(400).json({ message: 'Invalid email' });
   }
-});
+  if (!password || password.length < 6 || check_sql_injection(password)) {
+    return res.status(400).json({ message: 'Invalid password' });
+  }
 
-router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
-
-    // Базова перевірка даних
-    if (!email || !password) {
-      return res.status(400).json({ msg: 'Please provide both email and password' });
-    }
-
-    // Знайти користувача за email
     const user = await User.findOne({ email });
-
     if (!user) {
-      return res.status(404).json({ msg: 'User not found' });
+      return res.status(400).json({ message: 'User not found' });
     }
 
-    // Хешувати наданий пароль і порівняти з збереженим хешем
-    const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
-
-    if (hashedPassword !== user.password) {
-      return res.status(401).json({ msg: 'Invalid credentials' });
+    // Хешування пароля, введеного користувачем
+    const hashedPassword = hashPassword(password);
+    if (user.password !== hashedPassword) {
+      return res.status(400).json({ message: 'Invalid password' });
     }
 
-    // Створити JWT токен
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, SECRET_KEY, { expiresIn: '7d' });
-
-    // Встановити токен у cookie
-    res.cookie('token', token, COOKIE_OPTIONS);
-    res.json({ msg: 'Login successful', status: true, token });
+    // Створення токена з терміном дії 7 днів
+    const token = jwt.sign({ id: user.id }, jwtSecret, { expiresIn: '7d' });
+    res.json({ message: 'Login successful', token });
   } catch (err) {
-    console.error(err.message);
-    res.status(500).send('Server Error');
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
+// Захищений маршрут
+users.post('/dashboard', async (req, res) => {
+  const token = req.body.token;
 
-router.post('/get_user_data', async (req, res) => {
+  if (!token) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  // Перевірка і декодування токена
+  jwt.verify(token, jwtSecret, async (err, decoded) => {
+    if (err) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    try {
+      const user = await User.findOne({ id: decoded.id });
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+
+      res.json({
+        message: 'Welcome to your dashboard',
+        user: {
+          id: user.id,
+          name: user.name,
+          age: user.age,
+          email: user.email,
+          role: user.role,
+          additionalInfo: user.additionalInfo,
+          avatar: user.avatar // Переконайтеся, що аватар доступний
+        }
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+});
+
+// Вихід з системи
+users.get('/logout', (req, res) => {
+  res.clearCookie('token');
+  res.json({ message: 'Logged out successfully' });
+});
+
+// Завантаження аватара
+users.get('/avatar/:userId', async (req, res) => {
   try {
-    const { id } = req.body;
+    const userId = req.params.userId;
+    const user = await User.findOne({ id: userId });
 
-    const user = await User.findOne({id});
-    console.log(user)
-    if (!user) {
-      return res.status(404).json({ msg: 'User not found' });
+    if (!user || !user.avatar) {
+      return res.status(404).json({ message: 'Avatar not found' });
     }
 
-    res.json({ user, status: true });
+    res.set('Content-Type', 'image/jpeg'); // Встановіть тип вмісту відповідно до типу вашого аватара
+    res.send(user.avatar); // Відправляємо аватар як Buffer
   } catch (err) {
-    console.error(err.message);
-    res.status(500).send('Server Error');
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Видалення користувача за ID
-router.post('/delete_user', async (req, res) => {
-  try {
-    const { id } = req.body;
-
-    // Видалення користувача зі списку за його ідентифікатором
-    const deletedUser = await User.deleteMany({ id: id });
-
-    if (deletedUser.deletedCount === 0) {
-      return res.status(404).json({ msg: 'User not found' });
-    }
-
-    res.json({ msg: 'User deleted successfully', status: true });
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).send('Server Error');
-  }
-});
-
-
-
-module.exports = router;
+module.exports = users;
